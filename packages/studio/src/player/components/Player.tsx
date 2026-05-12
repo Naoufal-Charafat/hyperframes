@@ -45,7 +45,11 @@ function hasUnloadedAssets(iframe: HTMLIFrameElement, lastResult: boolean): bool
     if (!win || !doc) return lastResult;
 
     for (const el of doc.querySelectorAll("video, audio")) {
-      if (el instanceof HTMLMediaElement && el.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+      if (
+        el instanceof HTMLMediaElement &&
+        el.preload === "auto" &&
+        el.readyState < HTMLMediaElement.HAVE_FUTURE_DATA
+      ) {
         return true;
       }
     }
