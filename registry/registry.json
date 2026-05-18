@@ -60,6 +60,10 @@
       "type": "hyperframes:block"
     },
     {
+      "name": "spain-map",
+      "type": "hyperframes:block"
+    },
+    {
       "name": "flowchart",
       "type": "hyperframes:block"
     },
