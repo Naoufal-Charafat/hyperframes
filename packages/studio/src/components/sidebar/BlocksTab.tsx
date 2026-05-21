@@ -5,8 +5,6 @@ import {
   getCategoryColors,
   type BlockCategory,
 } from "../../utils/blockCategories";
-import { TIMELINE_BLOCK_MIME } from "../../utils/timelineAssetDrop";
-
 export interface BlockPreviewInfo {
   videoUrl?: string;
   posterUrl?: string;
@@ -14,12 +12,11 @@ export interface BlockPreviewInfo {
 }
 
 interface BlocksTabProps {
-  onAddBlock: (blockName: string) => void;
   onPreviewBlock?: (preview: BlockPreviewInfo | null) => void;
 }
 
 // fallow-ignore-next-line complexity
-export const BlocksTab = memo(function BlocksTab({ onAddBlock, onPreviewBlock }: BlocksTabProps) {
+export const BlocksTab = memo(function BlocksTab({ onPreviewBlock }: BlocksTabProps) {
   const { loading, error, search, setSearch, category, setCategory, filteredBlocks } =
     useBlockCatalog();
 
@@ -104,10 +101,6 @@ export const BlocksTab = memo(function BlocksTab({ onAddBlock, onPreviewBlock }:
           >
             {filteredBlocks.map((block) => {
               const dur = "duration" in block ? (block.duration as number) : undefined;
-              const dims =
-                "dimensions" in block
-                  ? (block.dimensions as { width: number; height: number })
-                  : undefined;
               return (
                 <BlockCard
                   key={block.name}
@@ -120,8 +113,6 @@ export const BlocksTab = memo(function BlocksTab({ onAddBlock, onPreviewBlock }:
                   tags={block.tags}
                   posterUrl={block.preview?.poster}
                   videoUrl={block.preview?.video}
-                  dimensions={dims}
-                  onAdd={() => onAddBlock(block.name)}
                   onPreview={onPreviewBlock}
                 />
               );
@@ -172,30 +163,52 @@ function buildAgentPrompt(
   const isComponent = blockType === "hyperframes:component";
   const kind = isComponent ? "component" : "block";
 
-  const categoryHints: Record<string, string> = {
-    captions:
-      "This is a caption style. Add it to the composition, then customize the transcript text, fonts, colors, and timing to match the voiceover or audio.",
-    vfx: "This is a VFX effect. Add it as an overlay and adjust shader parameters, colors, and intensity to match the scene.",
-    transitions:
-      "This is a transition. Place it between two scenes on the timeline and adjust the duration and direction.",
-    effects:
-      "This is a visual effect overlay. Layer it on top of existing content and tweak colors, opacity, and animation timing.",
-    social:
-      "This is a social media template. Customize the text, handle, avatar, and metrics to match the content.",
-    data: "This is a data visualization. Update the data values, labels, colors, and animation stagger to tell the right story.",
-    scenes:
-      "This is a full scene. Customize the text, images, layout, and animation timing to fit the narrative.",
+  const categoryPrompts: Record<string, string> = {
+    captions: [
+      `Using /hyperframes, add the "${title}" caption style (registry: ${name}) to my composition.`,
+      `${description}`,
+      `Transcribe the audio with /hyperframes-media, then wire the transcript into this caption component. Match the font colors and animation timing to my composition's design tokens. Place it as an overlay above the main content with the highest z-index.`,
+    ].join("\n\n"),
+    vfx: [
+      `Using /hyperframes, add the "${title}" VFX (registry: ${name}) as a full-screen overlay on my composition.`,
+      `${description}`,
+      `This is a WebGL effect that requires chrome://flags/#html-in-canvas. Layer it on top of all content, adjust the shader uniforms and color palette to complement my scene, and set the duration to match the composition length.`,
+    ].join("\n\n"),
+    transitions: [
+      `Using /hyperframes, add the "${title}" transition (registry: ${name}) between my scenes.`,
+      `${description}`,
+      `Place this transition at the cut point between the current scene and the next. Set the duration to 0.5–1s, position it at the scene boundary on the timeline, and make sure the z-index is above both scenes. Adjust colors to match my palette.`,
+    ].join("\n\n"),
+    effects: [
+      `Using /hyperframes, add the "${title}" effect (registry: ${name}) as an overlay on my composition.`,
+      `${description}`,
+      `Layer this on top of the current content. Adjust the opacity, colors, and animation timing to enhance the scene without overwhelming the main content.`,
+    ].join("\n\n"),
+    social: [
+      `Using /hyperframes, add the "${title}" template (registry: ${name}) to my composition.`,
+      `${description}`,
+      `Replace the placeholder text, handle, and avatar with my actual content. Match the typography and colors to my brand. Adjust timing so the elements animate in sync with the voiceover.`,
+    ].join("\n\n"),
+    data: [
+      `Using /hyperframes, add the "${title}" visualization (registry: ${name}) to my composition.`,
+      `${description}`,
+      `Replace the placeholder data with my actual values and labels. Adjust the color scale, animation stagger timing, and typography to match my composition's design system. Size it to fit the current viewport.`,
+    ].join("\n\n"),
+    scenes: [
+      `Using /hyperframes, add the "${title}" scene (registry: ${name}) to my composition.`,
+      `${description}`,
+      `Replace all placeholder text, images, and content with my actual material. Match fonts, colors, and layout to my existing design tokens. Set the timeline position and duration to fit the narrative flow.`,
+    ].join("\n\n"),
   };
 
-  const hint = categoryHints[category] ?? `Customize this ${kind} to fit the composition.`;
-
-  return [
-    `Add the "${title}" ${kind} (registry: ${name}) to my composition using /hyperframes.`,
-    "",
-    `${description}`,
-    "",
-    hint,
-  ].join("\n");
+  return (
+    categoryPrompts[category] ??
+    [
+      `Using /hyperframes, add the "${title}" ${kind} (registry: ${name}) to my composition.`,
+      `${description}`,
+      `Customize it to match my composition's design and timeline.`,
+    ].join("\n\n")
+  );
 }
 
 function BlockCard({
@@ -208,8 +221,6 @@ function BlockCard({
   tags,
   posterUrl,
   videoUrl,
-  dimensions,
-  onAdd,
   onPreview,
 }: {
   name: string;
@@ -221,12 +232,9 @@ function BlockCard({
   tags?: string[];
   posterUrl?: string;
   videoUrl?: string;
-  dimensions?: { width: number; height: number };
-  onAdd: () => void;
   onPreview?: (preview: BlockPreviewInfo | null) => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const [adding, setAdding] = useState(false);
   const [copied, setCopied] = useState(false);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const colors = getCategoryColors(category);
@@ -254,17 +262,6 @@ function BlockCard({
     };
   }, []);
 
-  const handleAdd = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      if (adding) return;
-      setAdding(true);
-      onAdd();
-      setTimeout(() => setAdding(false), 1000);
-    },
-    [onAdd, adding],
-  );
-
   const handleCopyPrompt = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -276,21 +273,11 @@ function BlockCard({
     [title, name, description, category, blockType],
   );
 
-  const handleDragStart = useCallback(
-    (e: React.DragEvent) => {
-      e.dataTransfer.effectAllowed = "copy";
-      e.dataTransfer.setData(TIMELINE_BLOCK_MIME, JSON.stringify({ name, duration, dimensions }));
-    },
-    [name, duration, dimensions],
-  );
-
   return (
     <div
       className="group/card rounded-md overflow-hidden cursor-pointer transition-colors bg-neutral-900 hover:bg-neutral-800"
       onPointerEnter={handleEnter}
       onPointerLeave={handleLeave}
-      draggable
-      onDragStart={handleDragStart}
     >
       {/* Thumbnail */}
       <div className="aspect-video w-full overflow-hidden relative">
@@ -321,44 +308,28 @@ function BlockCard({
           </div>
         )}
 
-        {/* Action buttons overlay */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/60 opacity-0 group-hover/card:opacity-100 transition-opacity">
-          <button
-            type="button"
-            onClick={handleAdd}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-white text-black text-[10px] font-semibold hover:bg-neutral-200 transition-colors"
+        {/* Ask agent overlay */}
+        <button
+          type="button"
+          onClick={handleCopyPrompt}
+          className="absolute inset-0 flex items-center justify-center gap-1.5 bg-black/60 opacity-0 group-hover/card:opacity-100 transition-opacity"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="text-white"
           >
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            {adding ? "Added" : "Add"}
-          </button>
-          <button
-            type="button"
-            onClick={handleCopyPrompt}
-            className="flex items-center gap-1 px-3 py-1 rounded-md bg-white/15 text-white/90 text-[9px] font-medium hover:bg-white/25 transition-colors"
-          >
-            <svg
-              width="9"
-              height="9"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-            {copied ? "Copied!" : "Agent prompt"}
-          </button>
-        </div>
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          <span className="text-[10px] font-semibold text-white">
+            {copied ? "Copied!" : "Ask agent"}
+          </span>
+        </button>
 
         {/* Badges */}
         <div className="absolute top-1 right-1 flex items-center gap-0.5 pointer-events-none">
