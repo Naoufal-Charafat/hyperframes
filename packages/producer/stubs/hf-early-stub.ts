@@ -244,82 +244,146 @@ function scheduleBatch(): void {
 // ─── Timeline proxy factory ───────────────────────────────────────────────────
 
 /**
- * Create a queuing proxy around a real GSAP timeline.
- *
- * All methods return `proxy` so that callers who chain off the returned value
- * continue to go through the proxy for the duration of the batching phase.
+ * Methods queued for rAF-based batch flush (mutating tween additions).
+ * These return the proxy for chaining and never synchronously flush.
  */
-// Methods that queue operations for batched flush (mutating tween additions).
-const BATCHED_METHODS = new Set<string>(["to", "from", "fromTo", "set", "add"]);
-const PROXY_STATE_KEYS = new Set(["__hfReal", "__hfQueue", "__hfIsProxy"]);
+const BATCHED_METHODS = new Set(["to", "from", "fromTo", "set", "add"]);
 
-function createFlushingMethodWrapper(
-  real: GsapTimeline,
-  fn: (...a: unknown[]) => unknown,
-  proxyRef: () => unknown,
-): (...args: unknown[]) => unknown {
-  return (...args: unknown[]) => {
-    flushPendingOperations();
-    const result = fn.call(real, ...args);
-    return result === real ? proxyRef() : result;
-  };
+/**
+ * Walk the real timeline's prototype chain and generate forwarding stubs on
+ * `proxy` for every public method not already present. Each stub flushes
+ * pending operations, calls the real method, and returns `proxy` when the
+ * real method returns `this` (for chaining). Private GSAP internals (keys
+ * starting with `_`) and `then` are skipped — `then` makes GSAP timelines
+ * thenable, which would cause `Promise.resolve(proxy)` / `await proxy` to
+ * hang for paused timelines.
+ */
+// fallow-ignore-next-line complexity
+function forwardRemainingMethods(proxy: TimelineProxy, real: GsapTimeline): void {
+  let obj: object | null = real as object;
+  while (obj !== null && obj !== Object.prototype) {
+    for (const key of Object.getOwnPropertyNames(obj)) {
+      if (key === "constructor" || key === "then" || key in proxy || BATCHED_METHODS.has(key))
+        continue;
+      if (key.charAt(0) === "_") continue;
+      const desc = Object.getOwnPropertyDescriptor(obj, key);
+      if (!desc || typeof desc.value !== "function") continue;
+      const fn = desc.value as (...a: unknown[]) => unknown;
+      (proxy as Record<string, unknown>)[key] = function (
+        this: unknown,
+        ...args: unknown[]
+      ): unknown {
+        flushPendingOperations();
+        const result = fn.call(real, ...args);
+        return result === real ? proxy : result;
+      };
+    }
+    obj = Object.getPrototypeOf(obj);
+  }
 }
 
+/**
+ * Create a queuing proxy around a real GSAP timeline.
+ *
+ * Batched methods (to/from/fromTo/set/add) queue operations for rAF flush.
+ * All other methods on the real timeline are forwarded via dynamically
+ * generated stubs that flush pending operations before delegating. This
+ * uses a plain object — not `new Proxy` — because Chrome's headless shell
+ * hangs when Proxy traps are exposed during page.goto navigation (Symbol
+ * probing, thenable checks, DevTools serialization).
+ */
 function wrapTimeline(real: GsapTimeline): TimelineProxy {
-  const state = {
+  const proxy: TimelineProxy = {
     __hfReal: real,
-    __hfQueue: [] as TimelineOperation[],
-    __hfIsProxy: true as const,
+    __hfQueue: [],
+    __hfIsProxy: true,
+
+    to(...args: unknown[]): TimelineProxy {
+      return enqueueTimelineOperation(proxy, "to", args);
+    },
+    from(...args: unknown[]): TimelineProxy {
+      return enqueueTimelineOperation(proxy, "from", args);
+    },
+    fromTo(...args: unknown[]): TimelineProxy {
+      return enqueueTimelineOperation(proxy, "fromTo", args);
+    },
+    set(...args: unknown[]): TimelineProxy {
+      return enqueueTimelineOperation(proxy, "set", args);
+    },
+    add(...args: unknown[]): TimelineProxy {
+      return enqueueTimelineOperation(proxy, "add", args);
+    },
+
+    pause(...args: unknown[]): TimelineProxy {
+      flushPendingOperations();
+      real.pause(...args);
+      return proxy;
+    },
+    play(...args: unknown[]): TimelineProxy {
+      flushPendingOperations();
+      real.play(...args);
+      return proxy;
+    },
+    seek(...args: unknown[]): TimelineProxy {
+      flushPendingOperations();
+      real.seek(...args);
+      return proxy;
+    },
+    totalTime(...args: unknown[]): unknown {
+      flushPendingOperations();
+      if (args.length > 0) {
+        real.totalTime(...args);
+        return proxy;
+      }
+      return real.totalTime();
+    },
+    time(...args: unknown[]): unknown {
+      flushPendingOperations();
+      if (args.length > 0) {
+        real.time(...args);
+        return proxy;
+      }
+      return real.time();
+    },
+    duration(...args: unknown[]): unknown {
+      flushPendingOperations();
+      if (args.length > 0) {
+        real.duration(...args);
+        return proxy;
+      }
+      return real.duration();
+    },
+    getChildren(...args: unknown[]): unknown[] {
+      flushPendingOperations();
+      const children = real.getChildren(...args);
+      return Array.isArray(children) ? children : [];
+    },
+    paused(...args: unknown[]): unknown {
+      flushPendingOperations();
+      if (args.length > 0) {
+        real.paused(...args);
+        return proxy;
+      }
+      return real.paused();
+    },
+    timeScale(...args: unknown[]): unknown {
+      flushPendingOperations();
+      if (args.length > 0) {
+        real.timeScale(...args);
+        return proxy;
+      }
+      return real.timeScale();
+    },
+    kill(): void {
+      flushPendingOperations();
+      real.kill();
+    },
   };
 
-  // Use a Proxy so that ANY method or property access on the timeline is
-  // forwarded to the real GSAP timeline after flushing pending operations.
-  // The previous plain-object approach only forwarded an explicit allowlist,
-  // which silently dropped calls like eventCallback(), vars, labels(),
-  // repeat(), and other GSAP API surface — causing black frames when
-  // compositions used anything outside the allowlist.
-  const proxy = new Proxy(state, {
-    // fallow-ignore-next-line complexity
-    get(_target, prop, receiver) {
-      if (PROXY_STATE_KEYS.has(prop as string)) {
-        return state[prop as keyof typeof state];
-      }
-      if (typeof prop === "string" && BATCHED_METHODS.has(prop)) {
-        return (...args: unknown[]) =>
-          enqueueTimelineOperation(
-            proxy as unknown as TimelineProxy,
-            prop as TimelineOperationMethod,
-            args,
-          );
-      }
-      const value = (real as Record<string | symbol, unknown>)[prop];
-      // Forwarded methods (getChildren, eventCallback, labels, etc.) flush
-      // then delegate. Return values are NOT re-proxied — getChildren()
-      // returns raw GSAP child timelines. This is intentional: batching
-      // applies to the root timeline only; child timelines returned by
-      // getChildren are used for enumeration/cleanup, not tween additions.
-      if (typeof value === "function") {
-        return createFlushingMethodWrapper(
-          real,
-          value as (...a: unknown[]) => unknown,
-          () => receiver,
-        );
-      }
-      // Non-function property reads also flush so post-batch reads (e.g.
-      // tl.vars, tl.data) see state consistent with all applied tweens.
-      if (value !== undefined) flushPendingOperations();
-      return value;
-    },
+  forwardRemainingMethods(proxy, real);
 
-    set(_target, prop, value) {
-      flushPendingOperations();
-      (real as Record<string | symbol, unknown>)[prop] = value;
-      return true;
-    },
-  });
-
-  activeProxies.push(proxy as unknown as TimelineProxy);
-  return proxy as unknown as TimelineProxy;
+  activeProxies.push(proxy);
+  return proxy;
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
