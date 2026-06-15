@@ -9,6 +9,39 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
+  label="HyperFrames v0.6.98"
+  description="Released - 2026-06-15"
+  tags={["Release", "Studio", "CLI", "Core"]}
+>
+Keyframe-aware timeline editing with proportional scaling on resize, music beat detection, and diamond rendering fixes.
+
+## Features
+
+- **Studio:** Scale GSAP positions on clip resize + shift on drag + diamond edge fixes ([#1448](https://github.com/heygen-com/hyperframes/pull/1448))
+- **Studio:** Drag keyframes with live beat snapping ([#1439](https://github.com/heygen-com/hyperframes/pull/1439))
+- **Studio, CLI:** Music beat detection with timeline guides + headless beats CLI ([#1424](https://github.com/heygen-com/hyperframes/pull/1424))
+- **CLI:** Flag overlapping text blocks in inspect ([#1436](https://github.com/heygen-com/hyperframes/pull/1436))
+- **Skills:** Video-creation workflow suite — routable workflows ([#1349](https://github.com/heygen-com/hyperframes/pull/1349))
+
+## Fixes
+
+- **Studio:** Delete only the active element's selected keyframes ([#1453](https://github.com/heygen-com/hyperframes/pull/1453))
+- **Studio:** Route rotation field edits through the animation like X/Y/W/H ([#1427](https://github.com/heygen-com/hyperframes/pull/1427))
+- **Studio:** Break all 7 circular dependency cycles and fix rules-of-hooks violation ([#1422](https://github.com/heygen-com/hyperframes/pull/1422))
+- **Core, Player, Studio:** Bound trimmed audio playback to the clip window ([#1430](https://github.com/heygen-com/hyperframes/pull/1430))
+- **Player:** Replace or clear the audio-src proxy instead of stacking ([#1409](https://github.com/heygen-com/hyperframes/pull/1409))
+- **Studio:** Disable the rotation field when the element can't be rotated ([#1412](https://github.com/heygen-com/hyperframes/pull/1412))
+
+## Refactors
+
+- **Producer:** Simplify — extract HDR compositor, delete dead code, consolidate patterns ([#1414](https://github.com/heygen-com/hyperframes/pull/1414))
+- **Studio:** Simplify hooks, split contexts, remove dead code ([#1416](https://github.com/heygen-com/hyperframes/pull/1416))
+- **Core:** Simplify packages/core — dead code, dedup, type safety ([#1413](https://github.com/heygen-com/hyperframes/pull/1413))
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.6.97...v0.6.98).
+</Update>
+
+<Update
   label="HyperFrames v0.6.97"
   description="Released - 2026-06-13"
   tags={["Release", "CLI", "Studio", "Core", "Engine", "Player"]}
